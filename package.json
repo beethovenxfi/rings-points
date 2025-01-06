@@ -1,0 +1,19 @@
+{
+    "name": "rings-points",
+    "version": "1.0.0",
+    "main": "src/app.ts",
+    "license": "MIT",
+    "scripts": {
+        "run": "ts-node -r dotenv/config ./src/app.ts"
+    },
+    "dependencies": {
+        "@types/node": "^22.10.2",
+        "dotenv": "^16.4.7",
+        "moment-timezone": "^0.5.46",
+        "typescript": "^5.7.2",
+        "viem": "^2.21.57"
+    },
+    "devDependencies": {
+        "ts-node": "^10.9.2"
+    }
+}
