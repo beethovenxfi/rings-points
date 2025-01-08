@@ -14,7 +14,7 @@ const PRECISION_DECIMALS = 36;
 const SCUSD_ADDRESS = '0xd3dce716f3ef535c5ff8d041c1a41c3bd89b97ae';
 const SCETH_ADDRESS = '0x3bce5cb273f0f148010bbea2470e7b5df84c7812';
 
-const NUMBER_OF_SNAPSHOTS_PER_EPOCH = 28;
+const NUMBER_OF_SNAPSHOTS_PER_EPOCH = 56;
 
 async function getBlockForTimestamp(timestmap: number): Promise<number> {
     const query = `
@@ -126,7 +126,9 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                 new Error(`Token balance not found in pool ${pool.id}`);
             }
 
-            const tokenPercentageOfTotalShares = parseFloat(tokenBalanceInPool!) / parseFloat(pool.totalShares);
+            const tokenPercentageOfTotalShares = (
+                parseFloat(tokenBalanceInPool!) / parseFloat(pool.totalShares)
+            ).toFixed(18);
 
             for (const user of pool.shares) {
                 if (parseFloat(user.balance) > 0) {
@@ -270,12 +272,17 @@ async function getUserWeights(tokenAddress: string, epochsAgo: number = 1) {
         });
     });
 
-    fs.writeFile(`rings_epoch_${startOfEpochTimestamp}.json`, JSON.stringify(weights), function (err) {
-        if (err) {
-            return console.error(err);
-        }
-        console.log(`File created: rings_epoch_${startOfEpochTimestamp}.json`);
-    });
+    fs.writeFile(
+        `rings_epoch_${startOfEpochTimestamp}_token_${tokenAddress}.json`,
+        JSON.stringify(weights),
+        function (err) {
+            if (err) {
+                return console.error(err);
+            }
+            console.log(`File created: rings_epoch_${startOfEpochTimestamp}_token_${tokenAddress}.json`);
+        },
+    );
 }
 
 getUserWeights(SCUSD_ADDRESS);
+// getUserWeights(SCETH_ADDRESS);
