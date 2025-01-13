@@ -11,6 +11,8 @@ const API_URL = `https://backend-v3.beets-ftm-node.com/graphql`;
 
 const PRECISION_DECIMALS = 36;
 
+const ONE_WEEK_IN_SECONDS = 604800;
+
 const SCUSD_ADDRESS = '0xd3dce716f3ef535c5ff8d041c1a41c3bd89b97ae';
 const SCETH_ADDRESS = '0x3bce5cb273f0f148010bbea2470e7b5df84c7812';
 
@@ -43,8 +45,6 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
     const blockInterval = Math.floor((endBlock - startBlock) / NUMBER_OF_SNAPSHOTS_PER_EPOCH);
 
     for (let i = startBlock; i <= endBlock; i += blockInterval) {
-        console.log(`Querying balances for block ${i}`);
-
         const query = `
         {
         pools(
@@ -202,18 +202,41 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
     return tokensOwned;
 }
 
-async function getUserWeights(tokenAddress: string, epochsAgo: number = 1) {
-    const startOfEpochTimestamp = moment()
-        .tz('Europe/Amsterdam')
-        .startOf('week')
-        .subtract(1, 'days')
-        .subtract(epochsAgo, 'weeks')
-        .unix();
+async function getUserWeights(tokenName: string, cycle: number = -1) {
+    const startOfEpochZero = 1734627600; // has an odd start
+    const endOfEpochZero = 1735340400; // therefore also odd end
+
+    let tokenAddress = '';
+
+    if (tokenName === 'scUSD') {
+        tokenAddress = SCUSD_ADDRESS;
+    } else if (tokenName === 'scETH') {
+        tokenAddress = SCETH_ADDRESS;
+    } else {
+        throw Error('Invalid token name');
+    }
+
+    let startOfEpochTimestamp = 1735340400; // epoch 1 start
+    let endtOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS; // epoch 1 end
+
+    // make sure we can also just pass a cycle number if we want to recompute
+    if (cycle === 0) {
+        startOfEpochTimestamp = startOfEpochZero;
+        endtOfEpochTimestamp = endOfEpochZero;
+    } else if (cycle < 0) {
+        cycle = Math.floor((moment().unix() - startOfEpochTimestamp) / ONE_WEEK_IN_SECONDS);
+        startOfEpochTimestamp = startOfEpochTimestamp + (cycle - 1) * ONE_WEEK_IN_SECONDS;
+        endtOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS;
+    } else {
+        startOfEpochTimestamp = startOfEpochTimestamp + (cycle - 1) * ONE_WEEK_IN_SECONDS;
+        endtOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS;
+    }
 
     const startBlock = await getBlockForTimestamp(startOfEpochTimestamp);
 
     const endOfEpochTimestamp = moment.unix(startOfEpochTimestamp).add(1, 'weeks').unix();
-    1735340401;
+
+    // for debug, so we can also run it in the middle of an epoch
     let endBlock = 0;
     if (endOfEpochTimestamp > moment().unix()) {
         endBlock = await getBlockForTimestamp(moment().subtract(2, 'hours').unix());
@@ -221,6 +244,7 @@ async function getUserWeights(tokenAddress: string, epochsAgo: number = 1) {
         endBlock = await getBlockForTimestamp(endOfEpochTimestamp);
     }
 
+    console.log(`Running for cycle: ${cycle} for token: ${tokenAddress}`);
     console.log(`Start block: ${startBlock}`);
     console.log(`Start time: ${moment.unix(startOfEpochTimestamp).format('MM/DD/YYYY - HH:mm:ss ZZ')}`);
     console.log(`End block: ${endBlock}`);
@@ -265,6 +289,8 @@ async function getUserWeights(tokenAddress: string, epochsAgo: number = 1) {
         weight: string;
     }[] = [];
 
+    const fileName = `rings_cycle_${cycle}_${tokenName}_beets.json`;
+
     Object.entries(userWeights).forEach(([userAddress, weight]) => {
         weights.push({
             user: userAddress,
@@ -272,17 +298,17 @@ async function getUserWeights(tokenAddress: string, epochsAgo: number = 1) {
         });
     });
 
-    fs.writeFile(
-        `rings_epoch_${startOfEpochTimestamp}_token_${tokenAddress}.json`,
-        JSON.stringify(weights),
-        function (err) {
-            if (err) {
-                return console.error(err);
-            }
-            console.log(`File created: rings_epoch_${startOfEpochTimestamp}_token_${tokenAddress}.json`);
-        },
-    );
+    fs.writeFile(fileName, JSON.stringify(weights), function (err) {
+        if (err) {
+            return console.error(err);
+        }
+        console.log(`File created: ${fileName}`);
+    });
 }
 
-getUserWeights(SCUSD_ADDRESS);
-// getUserWeights(SCETH_ADDRESS);
+async function runCycle() {
+    await getUserWeights('scUSD');
+    await getUserWeights('scETH');
+}
+
+runCycle();
