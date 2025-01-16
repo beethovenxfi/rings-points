@@ -1,5 +1,5 @@
 import moment from 'moment-timezone';
-import { createPublicClient, http, parseAbi, parseEther, parseUnits } from 'viem';
+import { createPublicClient, formatUnits, http, parseAbi, parseEther, parseUnits } from 'viem';
 import { sonic } from 'viem/chains';
 import * as fs from 'fs';
 
@@ -330,6 +330,47 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
         }
         console.log(`File created: ${fileName}`);
     });
+
+    if (tokenName === 'scUSD') {
+        const userPoints: Record<string, number> = {};
+        const averageBalance = await getAverageTokenBalance(tokenAddress, startBlock, endBlock);
+
+        for (const userAddress in userWeights) {
+            const weight = userWeights[userAddress];
+            const points =
+                parseFloat(formatUnits(weight, PRECISION_DECIMALS)) *
+                parseFloat(formatUnits(averageBalance, 6)) *
+                36 *
+                7;
+
+            if (userPoints[userAddress]) {
+                userPoints[userAddress] = userPoints[userAddress] + points;
+            } else {
+                userPoints[userAddress] = points;
+            }
+        }
+
+        const pointsResult: {
+            user: string;
+            points: string;
+        }[] = [];
+
+        const fileName = `rings_cycle_${cycle}_${tokenName}_beets_points.json`;
+
+        Object.entries(userPoints).forEach(([userAddress, points]) => {
+            pointsResult.push({
+                user: userAddress,
+                points: points.toString(),
+            });
+        });
+
+        fs.writeFile(fileName, JSON.stringify(pointsResult), function (err) {
+            if (err) {
+                return console.error(err);
+            }
+            console.log(`File created: ${fileName}`);
+        });
+    }
 }
 
 async function runCycle() {
