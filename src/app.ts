@@ -1,5 +1,6 @@
 import moment from 'moment-timezone';
-import { parseEther, parseUnits } from 'viem';
+import { createPublicClient, http, parseAbi, parseEther, parseUnits } from 'viem';
+import { sonic } from 'viem/chains';
 import * as fs from 'fs';
 
 const GRAPH_BASE_URL = `https://gateway-arbitrum.network.thegraph.com/api/${process.env.GRAPH_API_KEY}/deployments/id/`;
@@ -8,6 +9,9 @@ const GAUGE_GRAPH_DEPLOYMENT_ID = `QmSRNzwTmLu55ZxxyxYULS5T1Kar7upz1jzL5FsMzLpB2
 const BLOCKS_GRAPH_DEPLOYMENT_ID = `QmZYZcSMaGY2rrq8YFP9avicWf2GM8R2vpB2Xuap1WhipT`;
 
 const API_URL = `https://backend-v3.beets-ftm-node.com/graphql`;
+
+const RPC_URL = `https://rpc.soniclabs.com`;
+const BALANCER_VAULT_ADDRESS = '0xBA12222222228d8Ba445958a75a0704d566BF2C8';
 
 const PRECISION_DECIMALS = 36;
 
@@ -202,6 +206,30 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
     return tokensOwned;
 }
 
+async function getAverageTokenBalance(tokenAddress: string, startBlock: number, endBlock: number) {
+    const blockInterval = Math.floor((endBlock - startBlock) / NUMBER_OF_SNAPSHOTS_PER_EPOCH);
+
+    let sumOfTokenBalance = 0n;
+    const client = createPublicClient({
+        chain: sonic,
+        transport: http(),
+    });
+
+    for (let i = startBlock; i <= endBlock; i += blockInterval) {
+        const balance = (await client.readContract({
+            address: tokenAddress as `0x${string}`,
+            abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
+            functionName: 'balanceOf',
+            args: [BALANCER_VAULT_ADDRESS],
+            blockNumber: BigInt(i),
+        })) as bigint;
+
+        sumOfTokenBalance += balance;
+    }
+
+    return sumOfTokenBalance / BigInt(NUMBER_OF_SNAPSHOTS_PER_EPOCH);
+}
+
 async function getUserWeights(tokenName: string, cycle: number = -1) {
     const startOfEpochZero = 1734627600; // has an odd start
     const endOfEpochZero = 1735340400; // therefore also odd end
@@ -217,24 +245,22 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
     }
 
     let startOfEpochTimestamp = 1735340400; // epoch 1 start
-    let endtOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS; // epoch 1 end
+    let endOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS; // epoch 1 end
 
     // make sure we can also just pass a cycle number if we want to recompute
     if (cycle === 0) {
         startOfEpochTimestamp = startOfEpochZero;
-        endtOfEpochTimestamp = endOfEpochZero;
+        endOfEpochTimestamp = endOfEpochZero;
     } else if (cycle < 0) {
         cycle = Math.floor((moment().unix() - startOfEpochTimestamp) / ONE_WEEK_IN_SECONDS);
         startOfEpochTimestamp = startOfEpochTimestamp + (cycle - 1) * ONE_WEEK_IN_SECONDS;
-        endtOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS;
+        endOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS;
     } else {
         startOfEpochTimestamp = startOfEpochTimestamp + (cycle - 1) * ONE_WEEK_IN_SECONDS;
-        endtOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS;
+        endOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS;
     }
 
     const startBlock = await getBlockForTimestamp(startOfEpochTimestamp);
-
-    const endOfEpochTimestamp = moment.unix(startOfEpochTimestamp).add(1, 'weeks').unix();
 
     // for debug, so we can also run it in the middle of an epoch
     let endBlock = 0;
