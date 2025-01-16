@@ -1,5 +1,5 @@
 import moment from 'moment-timezone';
-import { createPublicClient, formatUnits, http, parseAbi, parseEther, parseUnits } from 'viem';
+import { createPublicClient, formatEther, formatUnits, http, parseAbi, parseEther, parseUnits } from 'viem';
 import { sonic } from 'viem/chains';
 import * as fs from 'fs';
 
@@ -62,7 +62,7 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                 balance
             }
             shares(
-            where: {userAddress_: {id_not: "0x0000000000000000000000000000000000000000"}}
+            where: {userAddress_: {id_not: "0x0000000000000000000000000000000000000000"}, balance_gt: 0}, first: 1000
             ) {
                 balance
                 userAddress {
@@ -134,19 +134,44 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                 parseFloat(tokenBalanceInPool!) / parseFloat(pool.totalShares)
             ).toFixed(18);
 
+            let totalBalances = 0;
+            let totalTokensOwned = 0n;
+
             for (const user of pool.shares) {
+                totalBalances += parseFloat(user.balance);
+
                 if (parseFloat(user.balance) > 0) {
+                    const usersShareOfPool = (parseFloat(user.balance!) / parseFloat(pool.totalShares)).toFixed(18);
+                    const tokensOwnedByUser =
+                        (BigInt(parseEther(tokenBalanceInPool!)) * BigInt(parseEther(`${usersShareOfPool}`))) /
+                        parseEther('1');
+
+                    totalTokensOwned += tokensOwnedByUser;
+
                     if (tokensOwned[user.userAddress.id]) {
-                        tokensOwned[user.userAddress.id] =
-                            tokensOwned[user.userAddress.id] +
-                            (BigInt(parseEther(user.balance)) * BigInt(parseEther(`${tokenPercentageOfTotalShares}`))) /
-                                parseEther('100');
+                        tokensOwned[user.userAddress.id] = tokensOwned[user.userAddress.id] + tokensOwnedByUser;
                     } else {
-                        tokensOwned[user.userAddress.id] =
-                            (BigInt(parseEther(user.balance)) * BigInt(parseEther(`${tokenPercentageOfTotalShares}`))) /
-                            parseEther('100');
+                        tokensOwned[user.userAddress.id] = tokensOwnedByUser;
                     }
                 }
+            }
+
+            // sanity check to make sure we are not missing any user shares
+            if (
+                totalBalances - parseFloat(pool.totalShares!) > 1 ||
+                totalBalances - parseFloat(pool.totalShares!) < -1
+            ) {
+                throw Error(`TotalSupply diff greater than 1, expected ${pool.totalShares} but got ${totalBalances}`);
+            }
+            if (
+                parseFloat(tokenBalanceInPool!) - parseFloat(formatEther(totalTokensOwned)) > 1 ||
+                parseFloat(tokenBalanceInPool!) - parseFloat(formatEther(totalTokensOwned)) < -1
+            ) {
+                throw Error(
+                    `TokenBalance diff greater than 1, expected ${tokenBalanceInPool} but got ${parseFloat(
+                        formatEther(totalTokensOwned),
+                    )}`,
+                );
             }
 
             const apiPool = apiGauges.data.poolGetPools.find((p) => p.id === pool.id);
@@ -156,12 +181,13 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                             {
                             liquidityGauge(id: "${apiPool.staking.gauge.id}",
                             block: {number: ${i}}) {
-                                shares(where: {balance_gt: 0}) {
-                                user {
-                                    id
-                                }
-                                balance
-                                }
+                                shares(where: {balance_gt: 0}, first: 1000) {
+                                    user {
+                                            id
+                                        }
+                                    balance
+                                    }
+                                totalSupply   
                             }
                             }`;
 
@@ -175,6 +201,7 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                     data: {
                         liquidityGauge: {
                             shares: { balance: string; user: { id: string } }[];
+                            totalSupply: string;
                         };
                     };
                 };
@@ -182,21 +209,34 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                 if (gaugeReponse.data.liquidityGauge) {
                     delete tokensOwned[apiPool.staking.gauge.id];
 
+                    let totalShares = 0;
                     for (const share of gaugeReponse.data.liquidityGauge.shares) {
                         if (parseFloat(share.balance) > 0) {
+                            totalShares += parseFloat(share.balance);
+
+                            const userShareOfPool = (parseFloat(share.balance!) / parseFloat(pool.totalShares)).toFixed(
+                                18,
+                            );
+                            const tokensOwnedByUser =
+                                (BigInt(parseEther(tokenBalanceInPool!)) * BigInt(parseEther(`${userShareOfPool}`))) /
+                                parseEther('1');
+
                             if (tokensOwned[share.user.id]) {
-                                tokensOwned[share.user.id] =
-                                    tokensOwned[share.user.id] +
-                                    (BigInt(parseEther(share.balance)) *
-                                        BigInt(parseEther(`${tokenPercentageOfTotalShares}`))) /
-                                        parseEther('100');
+                                tokensOwned[share.user.id] = tokensOwned[share.user.id] + tokensOwnedByUser;
                             } else {
-                                tokensOwned[share.user.id] =
-                                    (BigInt(parseEther(share.balance)) *
-                                        BigInt(parseEther(`${tokenPercentageOfTotalShares}`))) /
-                                    parseEther('100');
+                                tokensOwned[share.user.id] = tokensOwnedByUser;
                             }
                         }
+                    }
+
+                    // sanity check to make sure we are not missing any user shares
+                    if (
+                        totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) > 1 ||
+                        totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) < -1
+                    ) {
+                        throw Error(
+                            `TotalShares diff in gauge greater than 1, expected ${gaugeReponse.data.liquidityGauge.totalSupply} but got ${totalShares}`,
+                        );
                     }
                 }
             }
@@ -270,7 +310,7 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
         endBlock = await getBlockForTimestamp(endOfEpochTimestamp);
     }
 
-    console.log(`Running for cycle: ${cycle} for token: ${tokenAddress}`);
+    console.log(`Running for cycle: ${cycle} for token: ${tokenName}`);
     console.log(`Start block: ${startBlock}`);
     console.log(`Start time: ${moment.unix(startOfEpochTimestamp).format('MM/DD/YYYY - HH:mm:ss ZZ')}`);
     console.log(`End block: ${endBlock}`);
@@ -334,6 +374,7 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
     if (tokenName === 'scUSD') {
         const userPoints: Record<string, number> = {};
         const averageBalance = await getAverageTokenBalance(tokenAddress, startBlock, endBlock);
+        console.log(formatUnits(averageBalance, 6));
 
         for (const userAddress in userWeights) {
             const weight = userWeights[userAddress];
@@ -376,6 +417,10 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 async function runCycle() {
     await getUserWeights('scUSD');
     await getUserWeights('scETH');
+    await getUserWeights('scUSD', 1);
+    await getUserWeights('scETH', 1);
+    await getUserWeights('scUSD', 0);
+    await getUserWeights('scETH', 0);
 }
 
 runCycle();
