@@ -417,10 +417,6 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 async function runCycle() {
     await getUserWeights('scUSD');
     await getUserWeights('scETH');
-    await getUserWeights('scUSD', 1);
-    await getUserWeights('scETH', 1);
-    await getUserWeights('scUSD', 0);
-    await getUserWeights('scETH', 0);
 }
 
 runCycle();
