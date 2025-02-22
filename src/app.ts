@@ -20,6 +20,7 @@ const ONE_WEEK_IN_SECONDS = 604800;
 
 const SCUSD_ADDRESS = '0xd3dce716f3ef535c5ff8d041c1a41c3bd89b97ae';
 const SCETH_ADDRESS = '0x3bce5cb273f0f148010bbea2470e7b5df84c7812';
+const SCBTC_ADDRESS = '0xbb30e76d9bb2cc9631f7fc5eb8e87b5aff32bfbd';
 
 const NUMBER_OF_SNAPSHOTS_PER_EPOCH = 56;
 
@@ -411,6 +412,8 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
         tokenAddress = SCUSD_ADDRESS;
     } else if (tokenName === 'scETH') {
         tokenAddress = SCETH_ADDRESS;
+    } else if (tokenName === 'scBTC') {
+        tokenAddress = SCBTC_ADDRESS;
     } else {
         throw Error('Invalid token name');
     }
@@ -548,6 +551,7 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 async function runCycle() {
     await getUserWeights('scUSD');
     await getUserWeights('scETH');
+    await getUserWeights('scBTC');
 }
 
 runCycle();
