@@ -147,6 +147,7 @@ async function getUserBalances(tokenAddress: string, blockNumber: number): Promi
             .map((pool) => pool.id)
             .join('", "')}"], balance_gt: 0, user_: {id_not: "0x0000000000000000000000000000000000000000"}}
         block: {number: ${blockNumber}}
+        first: 1000
     ) {
         user {
             id
