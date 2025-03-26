@@ -529,20 +529,25 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 
     const balances = await getBalancesForBlock(tokenAddress, startBlock, endBlock);
 
-    // calculate weights
-    const userWeightsV2: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v2);
-    const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
-
-    const payload = {
-        pools: {
-            '0xBA12222222228d8Ba445958a75a0704d566BF2C8': userWeightsV2,
-            '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3,
-        },
-    };
-
     const type = tokenName === 'scUSD' ? 'USD' : 'ETH';
+    // calculate weights
+    if (Object.keys(balances.v2).length > 0) {
+        const userWeightsV2: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v2);
+        console.log(`Sending v2 payload for cycle: ${cycle} for token: ${tokenName}`);
+        await sendPayload(cycle, type, { pools: { '0xBA12222222228d8Ba445958a75a0704d566BF2C8': userWeightsV2 } });
+    } else {
+        console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
+    }
+    if (Object.keys(balances.v3).length > 0) {
+        const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
+        console.log(`Sending v3 payload for cycle: ${cycle} for token: ${tokenName}`);
+        await sendPayload(cycle, type, { pools: { '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3 } });
+    } else {
+        console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
+    }
+}
 
-    console.log(`Sending payload for cycle: ${cycle} for token: ${tokenName}`);
+async function sendPayload(cycle: number, type: string, payload: any) {
     const response = await fetch(`https://points-api.rings.money/protocol-points/beets/${cycle}/${type}`, {
         method: 'POST',
         headers: new Headers({
@@ -559,8 +564,8 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 7);
-    await getUserWeights('scETH', 7);
+    await getUserWeights('scUSD', 9);
+    await getUserWeights('scETH', 9);
 }
 
 runCycle();
