@@ -551,7 +551,7 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
         }),
         body: JSON.stringify(payload),
     });
-    if (response.status !== 200) {
+    if (response.status !== 201) {
         console.log(await response.text());
     } else {
         console.log('Success');
