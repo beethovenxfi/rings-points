@@ -535,13 +535,14 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 
     const payload = {
         pools: {
-            // '0xBA12222222228d8Ba445958a75a0704d566BF2C8': userWeightsV2,
+            '0xBA12222222228d8Ba445958a75a0704d566BF2C8': userWeightsV2,
             '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3,
         },
     };
 
     const type = tokenName === 'scUSD' ? 'USD' : 'ETH';
 
+    console.log(`Sending payload for cycle: ${cycle} for token: ${tokenName}`);
     const response = await fetch(`https://points-api.rings.money/protocol-points/beets/${cycle}/${type}`, {
         method: 'POST',
         headers: new Headers({
@@ -550,14 +551,16 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
         }),
         body: JSON.stringify(payload),
     });
-    console.log(response.status);
-    console.log(response.statusText);
-    console.log(await response.text());
+    if (response.status !== 200) {
+        console.log(await response.text());
+    } else {
+        console.log('Success');
+    }
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 5);
-    // await getUserWeights('scETH');
+    await getUserWeights('scUSD', 7);
+    await getUserWeights('scETH', 7);
 }
 
 runCycle();
