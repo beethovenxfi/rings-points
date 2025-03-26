@@ -58,7 +58,7 @@ async function getBlockForTimestamp(timestmap: number): Promise<number> {
     return parseFloat(blocksResponse.data.blocks[0].number);
 }
 
-async function getUserBalances(tokenAddress: string, blockNumber: number): Promise<PoolUserBalance[]> {
+async function getV2PoolUserBalances(tokenAddress: string, blockNumber: number): Promise<PoolUserBalance[]> {
     const query = `
     {
     pools(
@@ -117,7 +117,10 @@ async function getUserBalances(tokenAddress: string, blockNumber: number): Promi
             }),
         };
     });
+    return result;
+}
 
+async function getV3PoolUserBalances(tokenAddress: string, blockNumber: number): Promise<PoolUserBalance[]> {
     const poolIdQuery = `
         {
         pools(where: {tokens_: {address_in: ["${tokenAddress}"]}}
@@ -216,104 +219,135 @@ async function getUserBalances(tokenAddress: string, blockNumber: number): Promi
             });
         }
     }
+    return v3Result;
+}
 
-    return [...result, ...v3Result];
+async function getApiGauges(poolIds: string[]) {
+    const apiGauges = (await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            query: `{
+                    poolGetPools(
+                        where: {chainIn: [SONIC], idIn: ["${poolIds.join('", "')}"]}
+                    ) {
+                        id
+                        staking {
+                        gauge {
+                            id
+                        }
+                        }
+                    }
+                    }`,
+        }),
+    }).then((res) => res.json())) as {
+        data: {
+            poolGetPools: {
+                id: string;
+                staking: {
+                    gauge: { id: string };
+                };
+            }[];
+        };
+    };
+
+    return apiGauges;
 }
 
 async function getBalancesForBlock(tokenAddress: string, startBlock: number, endBlock: number) {
-    const tokensOwned: Record<string, bigint> = {};
+    const tokensOwnedInV2: Record<string, bigint> = {};
+    const tokensOwnedInV3: Record<string, bigint> = {};
 
     const blockInterval = Math.floor((endBlock - startBlock) / NUMBER_OF_SNAPSHOTS_PER_EPOCH);
 
-    for (let i = startBlock; i <= endBlock; i += blockInterval) {
-        const poolsResponse = await getUserBalances(tokenAddress, i);
+    for (let block = startBlock; block <= endBlock; block += blockInterval) {
+        const v2PoolUserBalances = await getV2PoolUserBalances(tokenAddress, block);
+        const v3PoolUserBalances = await getV3PoolUserBalances(tokenAddress, block);
 
-        const apiGauges = (await fetch(API_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                query: `{
-                        poolGetPools(
-                            where: {chainIn: [SONIC], idIn: ["${poolsResponse.map((pool) => pool.id).join('", "')}"]}
-                        ) {
-                            id
-                            staking {
-                            gauge {
-                                id
-                            }
-                            }
-                        }
-                        }`,
-            }),
-        }).then((res) => res.json())) as {
-            data: {
-                poolGetPools: {
-                    id: string;
-                    staking: {
-                        gauge: { id: string };
-                    };
-                }[];
-            };
+        const v2ApiGauges = await getApiGauges(v2PoolUserBalances.map((pool) => pool.id));
+        const v3ApiGauges = await getApiGauges(v3PoolUserBalances.map((pool) => pool.id));
+
+        await getTokensOwnedByUser(v2PoolUserBalances, tokenAddress, tokensOwnedInV2, v2ApiGauges, block);
+        await getTokensOwnedByUser(v3PoolUserBalances, tokenAddress, tokensOwnedInV3, v3ApiGauges, block);
+    }
+
+    return {
+        v2: tokensOwnedInV2,
+        v3: tokensOwnedInV3,
+    };
+}
+
+async function getTokensOwnedByUser(
+    poolUserBalances: PoolUserBalance[],
+    tokenAddress: string,
+    tokensOwned: Record<string, bigint>,
+    apiGauges: {
+        data: {
+            poolGetPools: {
+                id: string;
+                staking: {
+                    gauge: { id: string };
+                };
+            }[];
         };
+    },
+    blockNumber: number,
+) {
+    for (const pool of poolUserBalances) {
+        const tokenBalanceInPool = pool.tokens.find(
+            (token) => token.address.toLowerCase() === tokenAddress.toLowerCase(),
+        )?.balance;
 
-        for (const pool of poolsResponse) {
-            const tokenBalanceInPool = pool.tokens.find(
-                (token) => token.address.toLowerCase() === tokenAddress.toLowerCase(),
-            )?.balance;
+        if (!tokenBalanceInPool) {
+            new Error(`Token balance not found in pool ${pool.id}`);
+        }
 
-            if (!tokenBalanceInPool) {
-                new Error(`Token balance not found in pool ${pool.id}`);
-            }
+        let totalBalances = 0;
+        let totalTokensOwned = 0n;
 
-            let totalBalances = 0;
-            let totalTokensOwned = 0n;
+        for (const user of pool.shares) {
+            totalBalances += parseFloat(user.balance);
 
-            for (const user of pool.shares) {
-                totalBalances += parseFloat(user.balance);
+            if (parseFloat(user.balance) > 0) {
+                const usersShareOfPool = (parseFloat(user.balance!) / parseFloat(pool.totalShares)).toFixed(18);
+                const tokensOwnedByUser =
+                    (BigInt(parseEther(tokenBalanceInPool!)) * BigInt(parseEther(`${usersShareOfPool}`))) /
+                    parseEther('1');
 
-                if (parseFloat(user.balance) > 0) {
-                    const usersShareOfPool = (parseFloat(user.balance!) / parseFloat(pool.totalShares)).toFixed(18);
-                    const tokensOwnedByUser =
-                        (BigInt(parseEther(tokenBalanceInPool!)) * BigInt(parseEther(`${usersShareOfPool}`))) /
-                        parseEther('1');
+                totalTokensOwned += tokensOwnedByUser;
 
-                    totalTokensOwned += tokensOwnedByUser;
-
-                    if (tokensOwned[user.userAddress]) {
-                        tokensOwned[user.userAddress] = tokensOwned[user.userAddress] + tokensOwnedByUser;
-                    } else {
-                        tokensOwned[user.userAddress] = tokensOwnedByUser;
-                    }
+                if (tokensOwned[user.userAddress]) {
+                    tokensOwned[user.userAddress] = tokensOwned[user.userAddress] + tokensOwnedByUser;
+                } else {
+                    tokensOwned[user.userAddress] = tokensOwnedByUser;
                 }
             }
+        }
 
-            // sanity check to make sure we are not missing any user shares
-            if (
-                totalBalances - parseFloat(pool.totalShares!) > 1 ||
-                totalBalances - parseFloat(pool.totalShares!) < -1
-            ) {
-                throw Error(`TotalSupply diff greater than 1, expected ${pool.totalShares} but got ${totalBalances}`);
-            }
-            if (
-                parseFloat(tokenBalanceInPool!) - parseFloat(formatEther(totalTokensOwned)) > 1 ||
-                parseFloat(tokenBalanceInPool!) - parseFloat(formatEther(totalTokensOwned)) < -1
-            ) {
-                throw Error(
-                    `TokenBalance diff greater than 1, expected ${tokenBalanceInPool} but got ${parseFloat(
-                        formatEther(totalTokensOwned),
-                    )}`,
-                );
-            }
+        // sanity check to make sure we are not missing any user shares
+        if (totalBalances - parseFloat(pool.totalShares!) > 1 || totalBalances - parseFloat(pool.totalShares!) < -1) {
+            throw Error(`TotalSupply diff greater than 1, expected ${pool.totalShares} but got ${totalBalances}`);
+        }
+        if (
+            parseFloat(tokenBalanceInPool!) - parseFloat(formatEther(totalTokensOwned)) > 1 ||
+            parseFloat(tokenBalanceInPool!) - parseFloat(formatEther(totalTokensOwned)) < -1
+        ) {
+            throw Error(
+                `TokenBalance diff greater than 1, expected ${tokenBalanceInPool} but got ${parseFloat(
+                    formatEther(totalTokensOwned),
+                )}`,
+            );
+        }
 
-            const apiPool = apiGauges.data.poolGetPools.find((p) => p.id === pool.id);
+        const apiPool = apiGauges.data.poolGetPools.find((p) => p.id === pool.id);
 
-            if (apiPool?.staking) {
-                const query = `
+        if (apiPool?.staking) {
+            const query = `
                             {
                             liquidityGauge(id: "${apiPool.staking.gauge.id}",
-                            block: {number: ${i}}) {
+                            block: {number: ${blockNumber}}) {
                                 shares(where: {balance_gt: 0}, first: 1000) {
                                     user {
                                             id
@@ -324,59 +358,54 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
                             }
                             }`;
 
-                const gaugeReponse = (await fetch(GRAPH_BASE_URL + GAUGE_GRAPH_DEPLOYMENT_ID, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ query: query }),
-                }).then((res) => res.json())) as {
-                    data: {
-                        liquidityGauge: {
-                            shares: { balance: string; user: { id: string } }[];
-                            totalSupply: string;
-                        };
+            const gaugeReponse = (await fetch(GRAPH_BASE_URL + GAUGE_GRAPH_DEPLOYMENT_ID, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: query }),
+            }).then((res) => res.json())) as {
+                data: {
+                    liquidityGauge: {
+                        shares: { balance: string; user: { id: string } }[];
+                        totalSupply: string;
                     };
                 };
+            };
 
-                if (gaugeReponse.data.liquidityGauge) {
-                    delete tokensOwned[apiPool.staking.gauge.id];
+            if (gaugeReponse.data.liquidityGauge) {
+                delete tokensOwned[apiPool.staking.gauge.id];
 
-                    let totalShares = 0;
-                    for (const share of gaugeReponse.data.liquidityGauge.shares) {
-                        if (parseFloat(share.balance) > 0) {
-                            totalShares += parseFloat(share.balance);
+                let totalShares = 0;
+                for (const share of gaugeReponse.data.liquidityGauge.shares) {
+                    if (parseFloat(share.balance) > 0) {
+                        totalShares += parseFloat(share.balance);
 
-                            const userShareOfPool = (parseFloat(share.balance!) / parseFloat(pool.totalShares)).toFixed(
-                                18,
-                            );
-                            const tokensOwnedByUser =
-                                (BigInt(parseEther(tokenBalanceInPool!)) * BigInt(parseEther(`${userShareOfPool}`))) /
-                                parseEther('1');
+                        const userShareOfPool = (parseFloat(share.balance!) / parseFloat(pool.totalShares)).toFixed(18);
+                        const tokensOwnedByUser =
+                            (BigInt(parseEther(tokenBalanceInPool!)) * BigInt(parseEther(`${userShareOfPool}`))) /
+                            parseEther('1');
 
-                            if (tokensOwned[share.user.id]) {
-                                tokensOwned[share.user.id] = tokensOwned[share.user.id] + tokensOwnedByUser;
-                            } else {
-                                tokensOwned[share.user.id] = tokensOwnedByUser;
-                            }
+                        if (tokensOwned[share.user.id]) {
+                            tokensOwned[share.user.id] = tokensOwned[share.user.id] + tokensOwnedByUser;
+                        } else {
+                            tokensOwned[share.user.id] = tokensOwnedByUser;
                         }
                     }
+                }
 
-                    // sanity check to make sure we are not missing any user shares
-                    if (
-                        totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) > 1 ||
-                        totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) < -1
-                    ) {
-                        throw Error(
-                            `TotalShares diff in gauge greater than 1, expected ${gaugeReponse.data.liquidityGauge.totalSupply} but got ${totalShares}`,
-                        );
-                    }
+                // sanity check to make sure we are not missing any user shares
+                if (
+                    totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) > 1 ||
+                    totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) < -1
+                ) {
+                    throw Error(
+                        `TotalShares diff in gauge greater than 1, expected ${gaugeReponse.data.liquidityGauge.totalSupply} but got ${totalShares}`,
+                    );
                 }
             }
         }
     }
-
-    return tokensOwned;
 }
 
 async function getAverageTokenBalance(tokenAddress: string, startBlock: number, endBlock: number) {
@@ -401,6 +430,53 @@ async function getAverageTokenBalance(tokenAddress: string, startBlock: number, 
     }
 
     return sumOfTokenBalance / BigInt(NUMBER_OF_SNAPSHOTS_PER_EPOCH);
+}
+
+function getUserWeightsFromBalances(balances: Record<string, bigint>) {
+    const totalTokenBalance = Object.values(balances).reduce((acc, balance) => (acc += balance));
+
+    const userWeights: Record<string, bigint> = {};
+
+    let lastUser = '';
+    for (const user in balances) {
+        if (balances.hasOwnProperty(user)) {
+            const balance = balances[user];
+            userWeights[user] = (balance * parseUnits('1', PRECISION_DECIMALS)) / totalTokenBalance;
+            lastUser = user;
+        }
+    }
+
+    // need to make sure total of all weights is 1, select an unlucky user
+    const totalWeight = Object.values(userWeights).reduce((acc, balance) => (acc += balance));
+    if (totalWeight > parseUnits('1', PRECISION_DECIMALS)) {
+        console.log(totalWeight);
+        console.log(`sorry, need to deduct ${totalWeight - parseUnits('1', PRECISION_DECIMALS)} from ${lastUser}`);
+        userWeights[lastUser] = userWeights[lastUser] - (totalWeight - parseUnits('1', PRECISION_DECIMALS));
+    } else if (totalWeight < parseUnits('1', PRECISION_DECIMALS)) {
+        console.log(totalWeight);
+        console.log(`yay, need to add ${parseUnits('1', PRECISION_DECIMALS) - totalWeight} to ${lastUser}`);
+        userWeights[lastUser] = userWeights[lastUser] + (parseUnits('1', PRECISION_DECIMALS) - totalWeight);
+    }
+
+    const totalWeightAfter = Object.values(userWeights).reduce((acc, balance) => (acc += balance));
+
+    if (totalWeightAfter !== parseUnits('1', PRECISION_DECIMALS)) {
+        console.log(totalWeightAfter);
+        throw Error('Did not add up to 1e36');
+    }
+
+    const weights: {
+        user: string;
+        weight: string;
+    }[] = [];
+
+    Object.entries(userWeights).forEach(([userAddress, weight]) => {
+        weights.push({
+            user: userAddress,
+            weight: weight.toString(),
+        });
+    });
+    return weights;
 }
 
 async function getUserWeights(tokenName: string, cycle: number = -1) {
@@ -453,106 +529,35 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 
     const balances = await getBalancesForBlock(tokenAddress, startBlock, endBlock);
 
-    const totalTokenBalance = Object.values(balances).reduce((acc, balance) => (acc += balance));
+    // calculate weights
+    const userWeightsV2: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v2);
+    const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
 
-    const userWeights: Record<string, bigint> = {};
+    const payload = {
+        pools: {
+            // '0xBA12222222228d8Ba445958a75a0704d566BF2C8': userWeightsV2,
+            '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3,
+        },
+    };
 
-    let lastUser = '';
-    for (const user in balances) {
-        if (balances.hasOwnProperty(user)) {
-            const balance = balances[user];
-            userWeights[user] = (balance * parseUnits('1', PRECISION_DECIMALS)) / totalTokenBalance;
-            lastUser = user;
-        }
-    }
+    const type = tokenName === 'scUSD' ? 'USD' : 'ETH';
 
-    // need to make sure total of all weights is 1, select an unlucky user
-    const totalWeight = Object.values(userWeights).reduce((acc, balance) => (acc += balance));
-    if (totalWeight > parseUnits('1', PRECISION_DECIMALS)) {
-        console.log(totalWeight);
-        console.log(`sorry, need to deduct ${totalWeight - parseUnits('1', PRECISION_DECIMALS)} from ${lastUser}`);
-        userWeights[lastUser] = userWeights[lastUser] - (totalWeight - parseUnits('1', PRECISION_DECIMALS));
-    } else if (totalWeight < parseUnits('1', PRECISION_DECIMALS)) {
-        console.log(totalWeight);
-        console.log(`yay, need to add ${parseUnits('1', PRECISION_DECIMALS) - totalWeight} to ${lastUser}`);
-        userWeights[lastUser] = userWeights[lastUser] + (parseUnits('1', PRECISION_DECIMALS) - totalWeight);
-    }
-
-    const totalWeightAfter = Object.values(userWeights).reduce((acc, balance) => (acc += balance));
-
-    if (totalWeightAfter !== parseUnits('1', PRECISION_DECIMALS)) {
-        console.log(totalWeightAfter);
-        throw Error('Did not add up to 1e36');
-    }
-
-    const weights: {
-        user: string;
-        weight: string;
-    }[] = [];
-
-    const fileName = `rings_cycle_${cycle}_${tokenName}_beets.json`;
-
-    Object.entries(userWeights).forEach(([userAddress, weight]) => {
-        weights.push({
-            user: userAddress,
-            weight: weight.toString(),
-        });
+    const response = await fetch(`https://points-api.rings.money/protocol-points/beets/${cycle}/${type}`, {
+        method: 'POST',
+        headers: new Headers({
+            Authorization: `Bearer ${process.env.RINGS_API_KEY}`,
+            'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify(payload),
     });
-
-    fs.writeFile(fileName, JSON.stringify(weights), function (err) {
-        if (err) {
-            return console.error(err);
-        }
-        console.log(`File created: ${fileName}`);
-    });
-
-    if (tokenName === 'scUSD') {
-        const userPoints: Record<string, number> = {};
-        const averageBalance = await getAverageTokenBalance(tokenAddress, startBlock, endBlock);
-        console.log(formatUnits(averageBalance, 6));
-
-        for (const userAddress in userWeights) {
-            const weight = userWeights[userAddress];
-            const points =
-                parseFloat(formatUnits(weight, PRECISION_DECIMALS)) *
-                parseFloat(formatUnits(averageBalance, 6)) *
-                36 *
-                7;
-
-            if (userPoints[userAddress]) {
-                userPoints[userAddress] = userPoints[userAddress] + points;
-            } else {
-                userPoints[userAddress] = points;
-            }
-        }
-
-        const pointsResult: {
-            user: string;
-            points: string;
-        }[] = [];
-
-        const fileName = `rings_cycle_${cycle}_${tokenName}_beets_points.json`;
-
-        Object.entries(userPoints).forEach(([userAddress, points]) => {
-            pointsResult.push({
-                user: userAddress,
-                points: points.toString(),
-            });
-        });
-
-        fs.writeFile(fileName, JSON.stringify(pointsResult), function (err) {
-            if (err) {
-                return console.error(err);
-            }
-            console.log(`File created: ${fileName}`);
-        });
-    }
+    console.log(response.status);
+    console.log(response.statusText);
+    console.log(await response.text());
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD');
-    await getUserWeights('scETH');
-    await getUserWeights('scBTC');
+    await getUserWeights('scUSD', 5);
+    // await getUserWeights('scETH');
 }
 
 runCycle();
