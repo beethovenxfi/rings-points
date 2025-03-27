@@ -59,64 +59,157 @@ async function getBlockForTimestamp(timestmap: number): Promise<number> {
 }
 
 async function getV2PoolUserBalances(tokenAddress: string, blockNumber: number): Promise<PoolUserBalance[]> {
-    const query = `
-    {
-    pools(
-        where: {tokensList_contains_nocase: ["${tokenAddress}"], totalShares_gt: 0}
-        block: {number: ${blockNumber}}
-    ) {
-        id
-        totalShares
-        tokens {
-            address
-            balance
-        }
-        shares(
-        where: {userAddress_: {id_not: "0x0000000000000000000000000000000000000000"}, balance_gt: 0}, first: 1000
+    let hasMore = true;
+    let id = `0`;
+    const pageSize = 1000;
+    const v2PoolIds: string[] = [];
+
+    while (hasMore) {
+        const query = `
+        {
+        pools(
+            where: {tokensList_contains_nocase: ["${tokenAddress}"], totalShares_gt: 0, id_gt: "${id}"}
+            orderBy: id
+            orderDirection: asc
+            first: ${pageSize}
+            block: {number: ${blockNumber}}
         ) {
-            balance
+            id
+        }
+        }`;
+
+        const pools = (await fetch(GRAPH_BASE_URL + BALANCER_GRAPH_DEPLOYMENT_ID, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: query }),
+        }).then((res) => res.json())) as {
+            data: {
+                pools: {
+                    id: string;
+                }[];
+            };
+        };
+
+        if (pools.data.pools.length === 0) {
+            break;
+        }
+
+        if (pools.data.pools.length < pageSize) {
+            hasMore = false;
+        }
+
+        v2PoolIds.push(...pools.data.pools.map((pool) => pool.id));
+
+        id = pools.data.pools[pools.data.pools.length - 1].id;
+    }
+
+    hasMore = true;
+    id = `0`;
+    const allPoolShares: {
+        id: string;
+        userAddress: { id: string };
+        poolId: {
+            id: string;
+            totalShares: string;
+            tokens: { address: string; balance: string }[];
+        };
+        balance: string;
+    }[] = [];
+
+    while (hasMore) {
+        const query = `
+        {
+        poolShares(
+            where: {poolId_in:["${v2PoolIds.join(
+                '", "',
+            )}"], userAddress_: {id_not: "0x0000000000000000000000000000000000000000"}, balance_gt:0, id_gt : "${id}"}
+            orderBy: id
+            orderDirection: asc
+            first: ${pageSize}
+            block: {number: ${blockNumber}}
+        ) {
+            id
             userAddress {
                 id
             }
+            poolId {
+                id
+                totalShares
+                tokens{
+                    address
+                    balance
+                }
+            }
+            balance
+        }
+        }`;
+
+        const shares = (await fetch(GRAPH_BASE_URL + BALANCER_GRAPH_DEPLOYMENT_ID, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: query }),
+        }).then((res) => res.json())) as {
+            data: {
+                poolShares: {
+                    id: string;
+                    userAddress: { id: string };
+                    poolId: {
+                        id: string;
+                        totalShares: string;
+                        tokens: { address: string; balance: string }[];
+                    };
+                    balance: string;
+                }[];
+            };
+        };
+
+        if (shares.data.poolShares.length === 0) {
+            break;
+        }
+
+        if (shares.data.poolShares.length < pageSize) {
+            hasMore = false;
+        }
+
+        allPoolShares.push(...shares.data.poolShares);
+
+        id = shares.data.poolShares[shares.data.poolShares.length - 1].id;
+    }
+
+    const result: PoolUserBalance[] = [];
+
+    for (const share of allPoolShares) {
+        const pool = result.find((pool) => pool.id === share.poolId.id);
+
+        if (!pool) {
+            result.push({
+                id: share.poolId.id,
+                totalShares: share.poolId.totalShares,
+                tokens: share.poolId.tokens.map((token) => {
+                    return {
+                        address: token.address,
+                        balance: token.balance,
+                    };
+                }),
+                shares: [
+                    {
+                        balance: share.balance,
+                        userAddress: share.userAddress.id,
+                    },
+                ],
+            });
+        } else {
+            pool.shares.push({
+                balance: share.balance,
+                userAddress: share.userAddress.id,
+            });
         }
     }
-    }`;
 
-    const poolsResponseV2 = (await fetch(GRAPH_BASE_URL + BALANCER_GRAPH_DEPLOYMENT_ID, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query: query }),
-    }).then((res) => res.json())) as {
-        data: {
-            pools: {
-                totalShares: string;
-                id: string;
-                tokens: { address: string; balance: string }[];
-                shares: { balance: string; userAddress: { id: string } }[];
-            }[];
-        };
-    };
-
-    const result = poolsResponseV2.data.pools.map((pool) => {
-        return {
-            id: pool.id,
-            totalShares: pool.totalShares,
-            tokens: pool.tokens.map((token) => {
-                return {
-                    address: token.address,
-                    balance: token.balance,
-                };
-            }),
-            shares: pool.shares.map((share) => {
-                return {
-                    balance: share.balance,
-                    userAddress: share.userAddress.id,
-                };
-            }),
-        };
-    });
     return result;
 }
 
@@ -344,40 +437,76 @@ async function getTokensOwnedByUser(
         const apiPool = apiGauges.data.poolGetPools.find((p) => p.id === pool.id);
 
         if (apiPool?.staking) {
-            const query = `
-                            {
-                            liquidityGauge(id: "${apiPool.staking.gauge.id}",
-                            block: {number: ${blockNumber}}) {
-                                shares(where: {balance_gt: 0}, first: 1000) {
-                                    user {
-                                            id
-                                        }
-                                    balance
-                                    }
-                                totalSupply   
-                            }
-                            }`;
+            let hasMore = true;
+            let id = `0`;
+            const pageSize = 1000;
+            const allGaugeShares: {
+                id: string;
+                user: { id: string };
+                balance: string;
+                gauge: {
+                    totalSupply: string;
+                };
+            }[] = [];
 
-            const gaugeReponse = (await fetch(GRAPH_BASE_URL + GAUGE_GRAPH_DEPLOYMENT_ID, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ query: query }),
-            }).then((res) => res.json())) as {
-                data: {
-                    liquidityGauge: {
-                        shares: { balance: string; user: { id: string } }[];
-                        totalSupply: string;
+            while (hasMore) {
+                const query = `
+                {
+                gaugeShares(
+                    where: {gauge_:{id:"${apiPool.staking.gauge.id}"}, balance_gt:0, id_gt : "${id}"}
+                    orderBy: id
+                    orderDirection: asc
+                    first: ${pageSize}
+                    block: {number: ${blockNumber}}
+                ) {
+                    id
+                    user{
+                        id
+                    }
+                    balance
+                    gauge{
+                        totalSupply
+                    }
+                }
+                }`;
+
+                const shares = (await fetch(GRAPH_BASE_URL + GAUGE_GRAPH_DEPLOYMENT_ID, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query: query }),
+                }).then((res) => res.json())) as {
+                    data: {
+                        gaugeShares: {
+                            id: string;
+                            user: { id: string };
+                            balance: string;
+                            gauge: {
+                                totalSupply: string;
+                            };
+                        }[];
                     };
                 };
-            };
 
-            if (gaugeReponse.data.liquidityGauge) {
+                if (shares.data.gaugeShares.length === 0) {
+                    break;
+                }
+
+                if (shares.data.gaugeShares.length < pageSize) {
+                    hasMore = false;
+                }
+
+                allGaugeShares.push(...shares.data.gaugeShares);
+
+                id = shares.data.gaugeShares[shares.data.gaugeShares.length - 1].id;
+            }
+
+            if (allGaugeShares.length > 0) {
                 delete tokensOwned[apiPool.staking.gauge.id];
 
                 let totalShares = 0;
-                for (const share of gaugeReponse.data.liquidityGauge.shares) {
+                for (const share of allGaugeShares) {
                     if (parseFloat(share.balance) > 0) {
                         totalShares += parseFloat(share.balance);
 
@@ -396,40 +525,16 @@ async function getTokensOwnedByUser(
 
                 // sanity check to make sure we are not missing any user shares
                 if (
-                    totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) > 1 ||
-                    totalShares - parseFloat(gaugeReponse.data.liquidityGauge.totalSupply) < -1
+                    totalShares - parseFloat(allGaugeShares[0].gauge.totalSupply) > 1 ||
+                    totalShares - parseFloat(allGaugeShares[0].gauge.totalSupply) < -1
                 ) {
                     throw Error(
-                        `TotalShares diff in gauge greater than 1, expected ${gaugeReponse.data.liquidityGauge.totalSupply} but got ${totalShares}`,
+                        `TotalShares diff in gauge greater than 1, expected ${allGaugeShares[0].gauge.totalSupply} but got ${totalShares}`,
                     );
                 }
             }
         }
     }
-}
-
-async function getAverageTokenBalance(tokenAddress: string, startBlock: number, endBlock: number) {
-    const blockInterval = Math.floor((endBlock - startBlock) / NUMBER_OF_SNAPSHOTS_PER_EPOCH);
-
-    let sumOfTokenBalance = 0n;
-    const client = createPublicClient({
-        chain: sonic,
-        transport: http(),
-    });
-
-    for (let i = startBlock; i <= endBlock; i += blockInterval) {
-        const balance = (await client.readContract({
-            address: tokenAddress as `0x${string}`,
-            abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
-            functionName: 'balanceOf',
-            args: [BALANCER_VAULT_ADDRESS],
-            blockNumber: BigInt(i),
-        })) as bigint;
-
-        sumOfTokenBalance += balance;
-    }
-
-    return sumOfTokenBalance / BigInt(NUMBER_OF_SNAPSHOTS_PER_EPOCH);
 }
 
 function getUserWeightsFromBalances(balances: Record<string, bigint>) {
@@ -538,13 +643,13 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
     } else {
         console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
     }
-    if (Object.keys(balances.v3).length > 0) {
-        const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
-        console.log(`Sending v3 payload for cycle: ${cycle} for token: ${tokenName}`);
-        await sendPayload(cycle, type, { pools: { '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3 } });
-    } else {
-        console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
-    }
+    //     if (Object.keys(balances.v3).length > 0) {
+    //         const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
+    //         console.log(`Sending v3 payload for cycle: ${cycle} for token: ${tokenName}`);
+    //         await sendPayload(cycle, type, { pools: { '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3 } });
+    //     } else {
+    //         console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
+    //     }
 }
 
 async function sendPayload(cycle: number, type: string, payload: any) {
@@ -564,8 +669,8 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 9);
-    await getUserWeights('scETH', 9);
+    // await getUserWeights('scUSD', 12);
+    await getUserWeights('scETH', 6);
 }
 
 runCycle();
