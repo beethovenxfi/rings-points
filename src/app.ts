@@ -643,13 +643,13 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
     } else {
         console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
     }
-    //     if (Object.keys(balances.v3).length > 0) {
-    //         const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
-    //         console.log(`Sending v3 payload for cycle: ${cycle} for token: ${tokenName}`);
-    //         await sendPayload(cycle, type, { pools: { '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3 } });
-    //     } else {
-    //         console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
-    //     }
+    if (Object.keys(balances.v3).length > 0) {
+        const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
+        console.log(`Sending v3 payload for cycle: ${cycle} for token: ${tokenName}`);
+        await sendPayload(cycle, type, { pools: { '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3 } });
+    } else {
+        console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
+    }
 }
 
 async function sendPayload(cycle: number, type: string, payload: any) {
@@ -669,8 +669,8 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    // await getUserWeights('scUSD', 12);
-    await getUserWeights('scETH', 6);
+    await getUserWeights('scUSD', 12);
+    await getUserWeights('scETH', 12);
 }
 
 runCycle();
