@@ -1,7 +1,5 @@
 import moment from 'moment-timezone';
-import { createPublicClient, formatEther, formatUnits, http, parseAbi, parseEther, parseUnits } from 'viem';
-import { sonic } from 'viem/chains';
-import * as fs from 'fs';
+import { formatEther, parseEther, parseUnits } from 'viem';
 
 const GRAPH_BASE_URL = `https://gateway-arbitrum.network.thegraph.com/api/${process.env.GRAPH_API_KEY}/deployments/id/`;
 const BALANCER_GRAPH_DEPLOYMENT_ID = `Qmbt2NyWBL8WKV5EuBDbByUEUETfhUBVpsLpptFbnwEyrK`;
@@ -11,16 +9,14 @@ const BLOCKS_GRAPH_DEPLOYMENT_ID = `QmZYZcSMaGY2rrq8YFP9avicWf2GM8R2vpB2Xuap1Whi
 
 const API_URL = `https://backend-v3.beets-ftm-node.com/graphql`;
 
-const RPC_URL = `https://rpc.soniclabs.com`;
-const BALANCER_VAULT_ADDRESS = '0xBA12222222228d8Ba445958a75a0704d566BF2C8';
-
 const PRECISION_DECIMALS = 36;
 
 const ONE_WEEK_IN_SECONDS = 604800;
 
 const SCUSD_ADDRESS = '0xd3dce716f3ef535c5ff8d041c1a41c3bd89b97ae';
 const SCETH_ADDRESS = '0x3bce5cb273f0f148010bbea2470e7b5df84c7812';
-const SCBTC_ADDRESS = '0xbb30e76d9bb2cc9631f7fc5eb8e87b5aff32bfbd';
+const WSTKSCUSD_ADDRESS = '0x9fb76f7ce5fceaa2c42887ff441d46095e494206';
+const WSTKSCETH_ADDRESS = '0x24c74b30d1a4261608e84bf5a618693032681dac';
 
 const NUMBER_OF_SNAPSHOTS_PER_EPOCH = 56;
 
@@ -584,22 +580,33 @@ function getUserWeightsFromBalances(balances: Record<string, bigint>) {
     return weights;
 }
 
-async function getUserWeights(tokenName: string, cycle: number = -1) {
+async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstkscETH', cycle: number = -1) {
     const startOfEpochZero = 1734627600; // has an odd start
     const endOfEpochZero = 1735340400; // therefore also odd end
 
     let tokenAddress = '';
+    let type = '';
 
-    if (tokenName === 'scUSD') {
-        tokenAddress = SCUSD_ADDRESS;
-    } else if (tokenName === 'scETH') {
-        tokenAddress = SCETH_ADDRESS;
-    } else if (tokenName === 'scBTC') {
-        tokenAddress = SCBTC_ADDRESS;
-    } else {
-        throw Error('Invalid token name');
+    switch (tokenName) {
+        case 'scUSD':
+            tokenAddress = SCUSD_ADDRESS;
+            type = 'holding-usd';
+            break;
+        case 'wstkscUSD':
+            tokenAddress = WSTKSCUSD_ADDRESS;
+            type = 'wrapped-staking-usd';
+            break;
+        case 'scETH':
+            tokenAddress = SCETH_ADDRESS;
+            type = 'holding-eth';
+            break;
+        case 'wstkscETH':
+            tokenAddress = WSTKSCETH_ADDRESS;
+            type = 'wrapped-staking-eth';
+            break;
+        default:
+            throw Error('Invalid token name');
     }
-
     let startOfEpochTimestamp = 1735340400; // epoch 1 start
     let endOfEpochTimestamp = startOfEpochTimestamp + ONE_WEEK_IN_SECONDS; // epoch 1 end
 
@@ -634,7 +641,8 @@ async function getUserWeights(tokenName: string, cycle: number = -1) {
 
     const balances = await getBalancesForBlock(tokenAddress, startBlock, endBlock);
 
-    const type = tokenName === 'scUSD' ? 'USD' : 'ETH';
+    // const type = tokenName === 'scUSD' ? 'holding-usd' : 'holding-eth';
+
     // calculate weights
     if (Object.keys(balances.v2).length > 0) {
         const userWeightsV2: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v2);
@@ -669,8 +677,10 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 12);
-    await getUserWeights('scETH', 12);
+    await getUserWeights('scUSD', 15);
+    await getUserWeights('scETH', 15);
+    await getUserWeights('wstkscETH', 15);
+    await getUserWeights('wstkscUSD', 15);
 }
 
 runCycle();
