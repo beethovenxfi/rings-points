@@ -2,8 +2,8 @@ import moment from 'moment-timezone';
 import { formatEther, parseEther, parseUnits } from 'viem';
 
 const GRAPH_BASE_URL = `https://gateway-arbitrum.network.thegraph.com/api/${process.env.GRAPH_API_KEY}/deployments/id/`;
-const BALANCER_GRAPH_DEPLOYMENT_ID = `Qmbt2NyWBL8WKV5EuBDbByUEUETfhUBVpsLpptFbnwEyrK`;
-const BALANCER_V3_GRAPH_DEPLOYMENT_ID = `QmR1ZDqDUyXih88ytCdaK3hV4ynrJJWst8UjeTg82PGwAf`;
+const BALANCER_GRAPH_DEPLOYMENT_ID = `QmPXaLKDvMMZdjD1ZuMpMSkRjKf8ALLVRtjUpTwWdKSvpQ`;
+const BALANCER_V3_GRAPH_DEPLOYMENT_ID = `QmUgRWkb5JUocGkVidpKtZFMHjexJzkBiSbjufURsXwn9X`;
 const GAUGE_GRAPH_DEPLOYMENT_ID = `QmSRNzwTmLu55ZxxyxYULS5T1Kar7upz1jzL5FsMzLpB2e`;
 const BLOCKS_GRAPH_DEPLOYMENT_ID = `QmZYZcSMaGY2rrq8YFP9avicWf2GM8R2vpB2Xuap1WhipT`;
 
@@ -677,10 +677,10 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 15);
-    await getUserWeights('scETH', 15);
-    await getUserWeights('wstkscETH', 15);
-    await getUserWeights('wstkscUSD', 15);
+    await getUserWeights('scUSD', 17);
+    await getUserWeights('scETH', 17);
+    await getUserWeights('wstkscETH', 17);
+    await getUserWeights('wstkscUSD', 17);
 }
 
 runCycle();
