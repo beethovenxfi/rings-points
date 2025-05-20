@@ -1,5 +1,6 @@
 import moment from 'moment-timezone';
 import { formatEther, parseEther, parseUnits } from 'viem';
+import * as fs from 'fs';
 
 const GRAPH_BASE_URL = `https://gateway-arbitrum.network.thegraph.com/api/${process.env.GRAPH_API_KEY}/deployments/id/`;
 const BALANCER_GRAPH_DEPLOYMENT_ID = `QmPXaLKDvMMZdjD1ZuMpMSkRjKf8ALLVRtjUpTwWdKSvpQ`;
@@ -648,6 +649,7 @@ async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstk
         const userWeightsV2: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v2);
         console.log(`Sending v2 payload for cycle: ${cycle} for token: ${tokenName}`);
         await sendPayload(cycle, type, { pools: { '0xBA12222222228d8Ba445958a75a0704d566BF2C8': userWeightsV2 } });
+        await writeFile(cycle, type, 'v2', userWeightsV2);
     } else {
         console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
     }
@@ -655,9 +657,21 @@ async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstk
         const userWeightsV3: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v3);
         console.log(`Sending v3 payload for cycle: ${cycle} for token: ${tokenName}`);
         await sendPayload(cycle, type, { pools: { '0xbA1333333333a1BA1108E8412f11850A5C319bA9': userWeightsV3 } });
+        await writeFile(cycle, type, 'v3', userWeightsV3);
     } else {
         console.log(`No balances found for cycle: ${cycle} for token: ${tokenName}`);
     }
+}
+
+async function writeFile(cycle: number, type: string, version: string, weights: { user: string; weight: string }[]) {
+    const fileName = `rings_cycle_${cycle}_${type}_${version}_weights.json`;
+
+    fs.writeFile(fileName, JSON.stringify(weights), function (err) {
+        if (err) {
+            return console.error(err);
+        }
+        console.log(`File created: ${fileName}`);
+    });
 }
 
 async function sendPayload(cycle: number, type: string, payload: any) {
@@ -677,10 +691,10 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 17);
-    await getUserWeights('scETH', 17);
-    await getUserWeights('wstkscETH', 17);
-    await getUserWeights('wstkscUSD', 17);
+    await getUserWeights('scUSD', 20);
+    await getUserWeights('scETH', 20);
+    await getUserWeights('wstkscETH', 20);
+    await getUserWeights('wstkscUSD', 20);
 }
 
 runCycle();
