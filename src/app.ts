@@ -59,7 +59,7 @@ async function getV2PoolUserBalances(tokenAddress: string, blockNumber: number):
     let hasMore = true;
     let id = `0`;
     const pageSize = 1000;
-    const v2PoolIds: string[] = [];
+    let v2PoolIds: string[] = [];
 
     while (hasMore) {
         const query = `
@@ -359,8 +359,8 @@ async function getBalancesForBlock(tokenAddress: string, startBlock: number, end
         const v2ApiGauges = await getApiGauges(v2PoolUserBalances.map((pool) => pool.id));
         const v3ApiGauges = await getApiGauges(v3PoolUserBalances.map((pool) => pool.id));
 
-        await getTokensOwnedByUser(v2PoolUserBalances, tokenAddress, tokensOwnedInV2, v2ApiGauges, block);
-        await getTokensOwnedByUser(v3PoolUserBalances, tokenAddress, tokensOwnedInV3, v3ApiGauges, block);
+        await getTokensOwnedByUser(v2PoolUserBalances, tokenAddress, tokensOwnedInV2, v2ApiGauges, block, 'v2');
+        await getTokensOwnedByUser(v3PoolUserBalances, tokenAddress, tokensOwnedInV3, v3ApiGauges, block, 'v3');
     }
 
     return {
@@ -384,7 +384,16 @@ async function getTokensOwnedByUser(
         };
     },
     blockNumber: number,
+    version: string,
 ) {
+    const userPoolShares: {
+        userAddress: string;
+        poolId: string;
+        gaugeId: string;
+        bptBalanceOfUser: string;
+        tokensOwnedByUser: string;
+    }[] = [];
+
     for (const pool of poolUserBalances) {
         const tokenBalanceInPool = pool.tokens.find(
             (token) => token.address.toLowerCase() === tokenAddress.toLowerCase(),
@@ -413,6 +422,13 @@ async function getTokensOwnedByUser(
                 } else {
                     tokensOwned[user.userAddress] = tokensOwnedByUser;
                 }
+                userPoolShares.push({
+                    userAddress: user.userAddress,
+                    poolId: pool.id,
+                    gaugeId: '',
+                    bptBalanceOfUser: user.balance,
+                    tokensOwnedByUser: formatEther(tokensOwnedByUser),
+                });
             }
         }
 
@@ -517,6 +533,13 @@ async function getTokensOwnedByUser(
                         } else {
                             tokensOwned[share.user.id] = tokensOwnedByUser;
                         }
+                        userPoolShares.push({
+                            userAddress: share.user.id,
+                            poolId: pool.id,
+                            gaugeId: apiPool.staking.gauge.id,
+                            bptBalanceOfUser: share.balance,
+                            tokensOwnedByUser: formatEther(tokensOwnedByUser),
+                        });
                     }
                 }
 
@@ -532,6 +555,7 @@ async function getTokensOwnedByUser(
             }
         }
     }
+    await writeUserDebugFile(blockNumber, tokenAddress, version, userPoolShares);
 }
 
 function getUserWeightsFromBalances(balances: Record<string, bigint>) {
@@ -642,8 +666,6 @@ async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstk
 
     const balances = await getBalancesForBlock(tokenAddress, startBlock, endBlock);
 
-    // const type = tokenName === 'scUSD' ? 'holding-usd' : 'holding-eth';
-
     // calculate weights
     if (Object.keys(balances.v2).length > 0) {
         const userWeightsV2: { user: string; weight: string }[] = getUserWeightsFromBalances(balances.v2);
@@ -664,9 +686,31 @@ async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstk
 }
 
 async function writeFile(cycle: number, type: string, version: string, weights: { user: string; weight: string }[]) {
-    const fileName = `rings_cycle_${cycle}_${type}_${version}_weights.json`;
+    const fileName = `results/rings_cycle_${cycle}_${type}_${version}_weights.json`;
 
     fs.writeFile(fileName, JSON.stringify(weights), function (err) {
+        if (err) {
+            return console.error(err);
+        }
+        console.log(`File created: ${fileName}`);
+    });
+}
+
+async function writeUserDebugFile(
+    blocknumber: number,
+    tokenAddress: string,
+    version: string,
+    userShares: {
+        userAddress: string;
+        poolId: string;
+        gaugeId: string;
+        bptBalanceOfUser: string;
+        tokensOwnedByUser: string;
+    }[],
+) {
+    const fileName = `debug/rings_debug_block_${blocknumber}_${tokenAddress}_${version}_shares.json`;
+
+    fs.writeFile(fileName, JSON.stringify(userShares), function (err) {
         if (err) {
             return console.error(err);
         }
@@ -691,10 +735,12 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 20);
-    await getUserWeights('scETH', 20);
-    await getUserWeights('wstkscETH', 20);
-    await getUserWeights('wstkscUSD', 20);
+    await getUserWeights('scUSD', 13);
+    await getUserWeights('scETH', 13);
+    await getUserWeights('scUSD', 21);
+    await getUserWeights('scETH', 21);
+    await getUserWeights('wstkscETH', 21);
+    await getUserWeights('wstkscUSD', 21);
 }
 
 runCycle();
