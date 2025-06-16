@@ -52,6 +52,8 @@ async function getBlockForTimestamp(timestmap: number): Promise<number> {
         data: { blocks: { number: string }[] };
     };
 
+    console.log(blocksResponse);
+
     return parseFloat(blocksResponse.data.blocks[0].number);
 }
 
@@ -735,12 +737,18 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 13);
-    await getUserWeights('scETH', 13);
-    await getUserWeights('scUSD', 21);
-    await getUserWeights('scETH', 21);
-    await getUserWeights('wstkscETH', 21);
-    await getUserWeights('wstkscUSD', 21);
+    await getUserWeights('scUSD', 22);
+    await getUserWeights('scETH', 22);
+    await getUserWeights('wstkscETH', 22);
+    await getUserWeights('wstkscUSD', 22);
+    await getUserWeights('scUSD', 23);
+    await getUserWeights('scETH', 23);
+    await getUserWeights('wstkscETH', 23);
+    await getUserWeights('wstkscUSD', 23);
+    await getUserWeights('scUSD', 24);
+    await getUserWeights('scETH', 24);
+    await getUserWeights('wstkscETH', 24);
+    await getUserWeights('wstkscUSD', 24);
 }
 
 runCycle();
