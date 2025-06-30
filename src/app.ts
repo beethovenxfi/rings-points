@@ -18,6 +18,8 @@ const SCUSD_ADDRESS = '0xd3dce716f3ef535c5ff8d041c1a41c3bd89b97ae';
 const SCETH_ADDRESS = '0x3bce5cb273f0f148010bbea2470e7b5df84c7812';
 const WSTKSCUSD_ADDRESS = '0x9fb76f7ce5fceaa2c42887ff441d46095e494206';
 const WSTKSCETH_ADDRESS = '0x24c74b30d1a4261608e84bf5a618693032681dac';
+const SILO_SCUSD_46_ADDRESS = '0xe6605932e4a686534d19005bb9db0fba1f101272';
+const SILO_SCETH_47_ADDRESS = '0x24c74b30d1a4261608e84bf5a618693032681dac';
 
 const NUMBER_OF_SNAPSHOTS_PER_EPOCH = 56;
 
@@ -607,7 +609,10 @@ function getUserWeightsFromBalances(balances: Record<string, bigint>) {
     return weights;
 }
 
-async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstkscETH', cycle: number = -1) {
+async function getUserWeights(
+    tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstkscETH' | 'siloScUSD-46' | 'siloScETH-47',
+    cycle: number = -1,
+) {
     const startOfEpochZero = 1734627600; // has an odd start
     const endOfEpochZero = 1735340400; // therefore also odd end
 
@@ -630,6 +635,14 @@ async function getUserWeights(tokenName: 'scUSD' | 'scETH' | 'wstkscUSD' | 'wstk
         case 'wstkscETH':
             tokenAddress = WSTKSCETH_ADDRESS;
             type = 'wrapped-staking-eth';
+            break;
+        case 'siloScUSD-46':
+            tokenAddress = SILO_SCUSD_46_ADDRESS;
+            type = 'silo.lending.0xDa6787a3543a01Bf770DDF3953bE5B9C99c1cBD0';
+            break;
+        case 'siloScETH-47':
+            tokenAddress = SILO_SCETH_47_ADDRESS;
+            type = 'silo.lending.0x6478362fbefd083F71705bD2BbBf3465170CDf4f';
             break;
         default:
             throw Error('Invalid token name');
@@ -737,18 +750,28 @@ async function sendPayload(cycle: number, type: string, payload: any) {
 }
 
 async function runCycle() {
-    await getUserWeights('scUSD', 22);
-    await getUserWeights('scETH', 22);
-    await getUserWeights('wstkscETH', 22);
-    await getUserWeights('wstkscUSD', 22);
-    await getUserWeights('scUSD', 23);
-    await getUserWeights('scETH', 23);
-    await getUserWeights('wstkscETH', 23);
-    await getUserWeights('wstkscUSD', 23);
-    await getUserWeights('scUSD', 24);
-    await getUserWeights('scETH', 24);
-    await getUserWeights('wstkscETH', 24);
-    await getUserWeights('wstkscUSD', 24);
+    // await getUserWeights('scUSD', 24);
+    // await getUserWeights('scETH', 24);
+    // await getUserWeights('wstkscETH', 24);
+    // await getUserWeights('wstkscUSD', 24);
+    // await getUserWeights('siloScUSD-46', 16);
+    // await getUserWeights('siloScETH-47', 16);
+    // await getUserWeights('siloScUSD-46', 17);
+    // await getUserWeights('siloScETH-47', 17);
+    // await getUserWeights('siloScUSD-46', 18);s
+    // await getUserWeights('siloScETH-47', 18);
+    // await getUserWeights('siloScUSD-46', 19);
+    // await getUserWeights('siloScETH-47', 19);
+    // await getUserWeights('siloScUSD-46', 20);
+    // await getUserWeights('siloScETH-47', 20);
+    // await getUserWeights('siloScUSD-46', 21);
+    // await getUserWeights('siloScETH-47', 21);
+    // await getUserWeights('siloScUSD-46', 22);
+    // await getUserWeights('siloScETH-47', 22);
+    // await getUserWeights('siloScUSD-46', 23);
+    // await getUserWeights('siloScETH-47', 23);
+    await getUserWeights('siloScUSD-46', 24);
+    await getUserWeights('siloScETH-47', 24);
 }
 
 runCycle();
